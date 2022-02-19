@@ -22,10 +22,10 @@ static FObjectExportSerialized ReadObjectExport(const FLinkerLoad* Linker, const
 FUE4AssetData FBlueprintParserUtils::ParseUObject(const UObject* Object)
 {
 	const auto PackageName = Object->GetPackage()->GetFName();
-	FPackagePath PackagePath;
-	FPackagePath::TryFromPackageName(PackageName, PackagePath);
+	// FPackagePath PackagePath;
+	// FPackagePath::TryFromPackageName(PackageName, PackagePath);
 	
-	const auto Linker = GetPackageLinker(nullptr, PackagePath, 0x0, nullptr, nullptr, nullptr, nullptr);
+	const auto Linker = GetPackageLinker(nullptr, *Object->GetPackage()->GetFName().ToString(), 0x0, nullptr, nullptr, nullptr, nullptr);
 
 	TArray<FBlueprintClassObject> BlueprintClassObjects;
 	TArray<FK2GraphNodeObject> K2GraphNodeObjects;

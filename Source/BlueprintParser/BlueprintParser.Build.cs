@@ -6,6 +6,7 @@ public class BlueprintParser : ModuleRules
 {
 	public BlueprintParser(ReadOnlyTargetRules Target) : base(Target)
 	{
+		// PublicDependencyModuleNames.AddRange();
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
 		PrivateDependencyModuleNames.AddRange(
@@ -18,7 +19,9 @@ public class BlueprintParser : ModuleRules
 				"BlueprintGraph",
 				"AIModule",
 				"Sockets",
-				"Networking"
+				"Networking",
+				"Json",
+				"JsonUtilities"
 			});
 	}
 }

@@ -7,6 +7,7 @@
 #include "Interfaces/IPv4/IPv4Address.h"
 #include "Interfaces/IPv4/IPv4Endpoint.h"
 #include "FIDEClient.h"
+#include "JsonObjectConverter.h"
 
 #define LOCTEXT_NAMESPACE "FBlueprintParserModule"
 DECLARE_LOG_CATEGORY_CLASS(LogBlueprintParser, Log, All);
@@ -55,7 +56,7 @@ void FBlueprintParserModule::CreateIDESocket()
 		ServeIDEClientConnection();
 	});
 }
-
+// TODO: Handle IDE disconnect
 void FBlueprintParserModule::ServeIDEClientConnection()
 {
 	while (bShouldListen)
@@ -102,7 +103,7 @@ void FBlueprintParserModule::ServeIDEClientData(const uint32 BufferSize)
 	if (Read != BufferSize)
 	{
 		UE_LOG(LogBlueprintParser, Warning,
-			TEXT("Didn't receive expected bytes amount! Expected: %d Actul: %d"), BufferSize, Read);
+			TEXT("Didn't receive expected bytes amount! Expected: %d Actual: %d"), BufferSize, Read);
 		return;
 	}
 
@@ -112,7 +113,39 @@ void FBlueprintParserModule::ServeIDEClientData(const uint32 BufferSize)
 		StrByte -= 1;
 	}
 	
-	const FString Data = BytesToString(RecvBuffer.GetData(), RecvBuffer.Num());
+	const FString ClassName = BytesToString(RecvBuffer.GetData(), RecvBuffer.Num());
+	const FString ClassNameWithoutPrefix = ClassName.RightChop(1);
+
+	FBlueprintClassObject* Obj = BlueprintClassObjectCache.Find(ClassName);
+	if (!Obj)
+	{
+		Obj = BlueprintClassObjectCache.Find(ClassNameWithoutPrefix);
+	}
+
+	if (!Obj)
+	{
+		FIDEResponse Response;
+		Response.Header.Status = EResponseStatus::ERROR;
+		Response.AnswerString = "Can't find blueprint class object with name " + ClassName;
+		FString JSONPayload;
+		TArray<uint8> BytesArray;
+		FJsonObjectConverter::UStructToJsonObjectString(Response, JSONPayload, 0, 0);
+		BytesArray.SetNumZeroed(JSONPayload.Len());
+		StringToBytes(JSONPayload, BytesArray.GetData(), BytesArray.Num());
+		int32 Sent = 0;
+		for (auto& Byte: BytesArray)
+		{
+			Byte += 1;
+		}
+		const int32 size = BytesArray.Num();
+		IDEClient->Socket->Send((uint8*)&size, sizeof(int32), Sent);
+		IDEClient->Socket->Send(BytesArray.GetData(), BytesArray.Num(), Sent);
+		if (Sent != BytesArray.Num())
+		{
+			UE_LOG(LogBlueprintParser, Warning,
+				TEXT("Didn't send expected bytes amount! Expected: %d Actual: %d"), BytesArray.Num(), Sent);
+		}
+	}
 }
 
 #undef LOCTEXT_NAMESPACE
