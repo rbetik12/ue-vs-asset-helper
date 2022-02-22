@@ -8,6 +8,8 @@
 #include "Interfaces/IPv4/IPv4Endpoint.h"
 #include "FIDEClient.h"
 #include "JsonObjectConverter.h"
+#include "Kismet2/KismetEditorUtilities.h"
+#include "Async/Async.h"
 
 #define LOCTEXT_NAMESPACE "FBlueprintParserModule"
 DECLARE_LOG_CATEGORY_CLASS(LogBlueprintParser, Log, All);
@@ -19,11 +21,11 @@ void FBlueprintParserModule::StartupModule()
 	ObjLib->bRecursivePaths = true;
 	ObjLib->LoadAssetDataFromPath(TEXT("/Game/"));
 	ObjLib->GetAssetDataList(AssetData);
-	for (const auto& Asset: AssetData)
+	for (const auto& Asset : AssetData)
 	{
 		const auto Object = Asset.GetAsset();
 		FUE4AssetData UEAssetData = FBlueprintParserUtils::ParseUObject(Object);
-		for (const auto& BlueprintClassObj: UEAssetData.BlueprintClasses)
+		for (const auto& BlueprintClassObj : UEAssetData.BlueprintClasses)
 		{
 			BlueprintClassObjectCache.Add(BlueprintClassObj.SuperClassName, BlueprintClassObj);
 		}
@@ -50,12 +52,13 @@ void FBlueprintParserModule::CreateIDESocket()
 	ISocketSubsystem* SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
 	ListenSocket->Bind(*SocketSubsystem->CreateInternetAddr(Endpoint.Address.Value, Endpoint.Port));
 	ListenSocket->Listen(1);
-	
+
 	IDEFuture = Async(EAsyncExecution::Thread, [&]()
 	{
 		ServeIDEClientConnection();
 	});
 }
+
 // TODO: Handle IDE disconnect
 void FBlueprintParserModule::ServeIDEClientConnection()
 {
@@ -76,7 +79,15 @@ void FBlueprintParserModule::ServeIDEClientConnection()
 		}
 		else if (bHasPendingConnection && IDEClient)
 		{
-			UE_LOG(LogBlueprintParser, Warning, TEXT("Unexpected pending client connection!"));
+			TSharedPtr<FInternetAddr> Addr = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->CreateInternetAddr();
+			FSocket* Client = ListenSocket->Accept(*Addr,TEXT("tcp-client"));
+			const FString AddressString = Addr->ToString(true);
+
+			IDEClient->Address = AddressString;
+			IDEClient->Socket->Wait(ESocketWaitConditions::WaitForWrite, 10000000);
+			IDEClient->Socket->Close();
+			IDEClient->Socket = Client;
+			// UE_LOG(LogBlueprintParser, Warning, TEXT("Unexpected pending client connection!"));
 		}
 
 		uint32 BufferSize = 0;
@@ -103,16 +114,16 @@ void FBlueprintParserModule::ServeIDEClientData(const uint32 BufferSize)
 	if (Read != BufferSize)
 	{
 		UE_LOG(LogBlueprintParser, Warning,
-			TEXT("Didn't receive expected bytes amount! Expected: %d Actual: %d"), BufferSize, Read);
+		       TEXT("Didn't receive expected bytes amount! Expected: %d Actual: %d"), BufferSize, Read);
 		return;
 	}
 
 	// Fix string by subtracting 1 from character value
-	for (auto& StrByte: RecvBuffer)
+	for (auto& StrByte : RecvBuffer)
 	{
 		StrByte -= 1;
 	}
-	
+
 	const FString ClassName = BytesToString(RecvBuffer.GetData(), RecvBuffer.Num());
 	const FString ClassNameWithoutPrefix = ClassName.RightChop(1);
 
@@ -127,27 +138,36 @@ void FBlueprintParserModule::ServeIDEClientData(const uint32 BufferSize)
 		FIDEResponse Response;
 		Response.Header.Status = EResponseStatus::ERROR;
 		Response.AnswerString = "Can't find blueprint class object with name " + ClassName;
-		FString JSONPayload;
-		TArray<uint8> BytesArray;
-		FJsonObjectConverter::UStructToJsonObjectString(Response, JSONPayload, 0, 0);
-		BytesArray.SetNumZeroed(JSONPayload.Len());
-		StringToBytes(JSONPayload, BytesArray.GetData(), BytesArray.Num());
-		int32 Sent = 0;
-		for (auto& Byte: BytesArray)
+
+		IDEClient->SendResponse(Response);
+	}
+	else
+	{
+		AsyncTask(ENamedThreads::GameThread, [=]
 		{
-			Byte += 1;
-		}
-		const int32 size = BytesArray.Num();
-		IDEClient->Socket->Send((uint8*)&size, sizeof(int32), Sent);
-		IDEClient->Socket->Send(BytesArray.GetData(), BytesArray.Num(), Sent);
-		if (Sent != BytesArray.Num())
-		{
-			UE_LOG(LogBlueprintParser, Warning,
-				TEXT("Didn't send expected bytes amount! Expected: %d Actual: %d"), BytesArray.Num(), Sent);
-		}
+			const auto PackageName = Obj->PackageName;
+			// An asset needs loading
+			UPackage* Package = LoadPackage(nullptr, *PackageName, LOAD_NoRedirects);
+
+			if (Package)
+			{
+				Package->FullyLoad();
+
+				FString AssetName = FPaths::GetBaseFilename(*PackageName);
+				UObject* Object = FindObject<UObject>(Package, *AssetName);
+				if (Object != nullptr)
+					FKismetEditorUtilities::BringKismetToFocusAttentionOnObject(Object);
+			}
+
+			FIDEResponse Response;
+			Response.Header.Status = EResponseStatus::OK;
+			Response.AnswerString = "Successfully opened blueprint object " + ClassName;
+
+			IDEClient->SendResponse(Response);
+		});
 	}
 }
 
 #undef LOCTEXT_NAMESPACE
-	
+
 IMPLEMENT_MODULE(FBlueprintParserModule, BlueprintParser)

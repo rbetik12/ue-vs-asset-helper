@@ -70,3 +70,20 @@ FUE4AssetData FBlueprintParserUtils::ParseUObject(const UObject* Object)
 	
 	return AssetData;
 }
+
+TArray<uint8> FBlueprintParserUtils::JsonToBytes(const FString& JSONPayload, bool FixBytes)
+{
+	TArray<uint8> BytesArray;
+	BytesArray.SetNumZeroed(JSONPayload.Len());
+	StringToBytes(JSONPayload, BytesArray.GetData(), BytesArray.Num());
+	
+	if (FixBytes)
+	{
+		for (auto& Byte : BytesArray)
+		{
+			Byte += 1;
+		}
+	}
+
+	return std::move(BytesArray);
+}

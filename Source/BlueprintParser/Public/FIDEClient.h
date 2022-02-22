@@ -2,13 +2,8 @@
 
 #include "Containers/EnumAsByte.h"
 #include "Containers/UnrealString.h"
+#include "Sockets.h"
 #include "FIDEClient.generated.h"
-
-struct FIDEClient
-{
-	FSocket* Socket;
-	FString Address;
-};
 
 UENUM()
 enum class EResponseStatus: uint8
@@ -36,4 +31,14 @@ struct FIDEResponse
 
 	UPROPERTY()
 	FString AnswerString;
+
+	FString ToJSON() const;
+};
+
+struct FIDEClient
+{
+	FSocket* Socket;
+	FString Address;
+
+	void SendResponse(const FIDEResponse& Response) const;
 };

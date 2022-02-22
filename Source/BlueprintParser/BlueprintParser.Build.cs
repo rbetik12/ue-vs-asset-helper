@@ -21,7 +21,8 @@ public class BlueprintParser : ModuleRules
 				"Sockets",
 				"Networking",
 				"Json",
-				"JsonUtilities"
+				"JsonUtilities",
+				"UnrealEd"
 			});
 	}
 }
