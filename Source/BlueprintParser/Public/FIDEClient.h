@@ -1,9 +1,16 @@
-﻿#pragma once
+#pragma once
 
 #include "Containers/EnumAsByte.h"
 #include "Containers/UnrealString.h"
 #include "Sockets.h"
 #include "FIDEClient.generated.h"
+
+UENUM()
+enum class ERequestType : uint8
+{
+	GET_INFO,
+	OPEN
+};
 
 UENUM()
 enum class EResponseStatus: uint8
@@ -13,26 +20,29 @@ enum class EResponseStatus: uint8
 };
 
 USTRUCT()
-struct FIDEResponseHeader
-{
-	GENERATED_BODY()
-
-	UPROPERTY()
-	TEnumAsByte<EResponseStatus> Status;
-};
-
-USTRUCT()
 struct FIDEResponse
 {
 	GENERATED_BODY()
 
 	UPROPERTY()
-	FIDEResponseHeader Header;
+	TEnumAsByte<EResponseStatus> Status;
 
 	UPROPERTY()
 	FString AnswerString;
 
 	FString ToJSON() const;
+};
+
+USTRUCT()
+struct FIDERequest
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TEnumAsByte<ERequestType> Type;
+
+	UPROPERTY()
+	FString Data;
 };
 
 struct FIDEClient

@@ -13,7 +13,8 @@ public:
 private:
 
 	void ServeIDEClientConnection();
-	void ServeIDEClientData(const uint32 BufferSize);
+	void ServeIDEClientData();
+	void ServeIDERequest(FIDERequest Request);
 	void CreateIDESocket();
 
 	TMap<FString, FBlueprintClassObject> BlueprintClassObjectCache;

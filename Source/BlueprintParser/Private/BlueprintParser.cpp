@@ -65,7 +65,8 @@ void FBlueprintParserModule::ServeIDEClientConnection()
 	while (bShouldListen)
 	{
 		bool bHasPendingConnection;
-		ListenSocket->HasPendingConnection(bHasPendingConnection);
+		//ListenSocket->HasPendingConnection(bHasPendingConnection);
+		ListenSocket->WaitForPendingConnection(bHasPendingConnection, 1000000);
 		if (bHasPendingConnection && !IDEClient)
 		{
 			TSharedPtr<FInternetAddr> Addr = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->CreateInternetAddr();
@@ -91,14 +92,14 @@ void FBlueprintParserModule::ServeIDEClientConnection()
 		}
 
 		uint32 BufferSize = 0;
-		if (IDEClient && IDEClient->Socket->HasPendingData(BufferSize))
+		if (IDEClient && IDEClient->Socket->HasPendingData(BufferSize) && BufferSize > 4)
 		{
-			ServeIDEClientData(BufferSize);
+			ServeIDEClientData();
 		}
 	}
 }
 
-void FBlueprintParserModule::ServeIDEClientData(const uint32 BufferSize)
+void FBlueprintParserModule::ServeIDEClientData()
 {
 	if (IDEClient->Socket->GetConnectionState() != ESocketConnectionState::SCS_Connected)
 	{
@@ -106,15 +107,23 @@ void FBlueprintParserModule::ServeIDEClientData(const uint32 BufferSize)
 		return;
 	}
 
-	TArray<uint8> RecvBuffer;
-	RecvBuffer.SetNumZeroed(BufferSize);
 	int32 Read = 0;
-
-	IDEClient->Socket->Recv(RecvBuffer.GetData(), RecvBuffer.Num(), Read);
-	if (Read != BufferSize)
+	int32 RequestSize = 0;
+	IDEClient->Socket->Recv((uint8*)&RequestSize, sizeof(int32), Read);
+	if (Read != 4)
 	{
 		UE_LOG(LogBlueprintParser, Warning,
-		       TEXT("Didn't receive expected bytes amount! Expected: %d Actual: %d"), BufferSize, Read);
+		       TEXT("Didn't receive expected bytes amount! Expected: %d Actual: %d"), 4, Read);
+		return;
+	}
+
+	TArray<uint8> RecvBuffer;
+	RecvBuffer.SetNumZeroed(RequestSize);
+	IDEClient->Socket->Recv(RecvBuffer.GetData(), RecvBuffer.Num(), Read);
+	if (Read != RequestSize)
+	{
+		UE_LOG(LogBlueprintParser, Warning,
+		       TEXT("Didn't receive expected bytes amount! Expected: %d Actual: %d"), RequestSize, Read);
 		return;
 	}
 
@@ -124,7 +133,21 @@ void FBlueprintParserModule::ServeIDEClientData(const uint32 BufferSize)
 		StrByte -= 1;
 	}
 
-	const FString ClassName = BytesToString(RecvBuffer.GetData(), RecvBuffer.Num());
+	const FString JSONStrRequest = BytesToString(RecvBuffer.GetData(), RecvBuffer.Num());
+	TSharedPtr<FJsonObject> JSONRequest = MakeShareable(new FJsonObject);
+	const auto Reader = TJsonReaderFactory<>::Create(JSONStrRequest);
+	if (!FJsonSerializer::Deserialize(Reader, JSONRequest))
+	{
+		// TODO: Handle json parse error
+	}
+	FIDERequest request;
+	FJsonObjectConverter::JsonObjectStringToUStruct(JSONStrRequest, &request);
+	ServeIDERequest(request);
+}
+
+void FBlueprintParserModule::ServeIDERequest(FIDERequest Request)
+{
+	const FString ClassName = Request.Data;
 	const FString ClassNameWithoutPrefix = ClassName.RightChop(1);
 
 	FBlueprintClassObject* Obj = BlueprintClassObjectCache.Find(ClassName);
@@ -136,35 +159,53 @@ void FBlueprintParserModule::ServeIDEClientData(const uint32 BufferSize)
 	if (!Obj)
 	{
 		FIDEResponse Response;
-		Response.Header.Status = EResponseStatus::ERROR;
+		Response.Status = EResponseStatus::ERROR;
 		Response.AnswerString = "Can't find blueprint class object with name " + ClassName;
 
 		IDEClient->SendResponse(Response);
 	}
 	else
 	{
-		AsyncTask(ENamedThreads::GameThread, [=]
+		switch (Request.Type)
 		{
-			const auto PackageName = Obj->PackageName;
-			// An asset needs loading
-			UPackage* Package = LoadPackage(nullptr, *PackageName, LOAD_NoRedirects);
-
-			if (Package)
+		case ERequestType::OPEN:
 			{
-				Package->FullyLoad();
+				AsyncTask(ENamedThreads::GameThread, [=]
+				{
+					const auto PackageName = Obj->PackageName;
+					UPackage* Package = LoadPackage(nullptr, *PackageName, LOAD_NoRedirects);
 
-				FString AssetName = FPaths::GetBaseFilename(*PackageName);
-				UObject* Object = FindObject<UObject>(Package, *AssetName);
-				if (Object != nullptr)
-					FKismetEditorUtilities::BringKismetToFocusAttentionOnObject(Object);
+					if (Package)
+					{
+						Package->FullyLoad();
+
+						FString AssetName = FPaths::GetBaseFilename(*PackageName);
+						UObject* Object = FindObject<UObject>(Package, *AssetName);
+						if (Object != nullptr)
+							FKismetEditorUtilities::BringKismetToFocusAttentionOnObject(Object);
+					}
+
+					FIDEResponse Response;
+					Response.Status = EResponseStatus::OK;
+					Response.AnswerString = "Successfully opened blueprint object " + ClassName;
+
+					IDEClient->SendResponse(Response);
+				});
 			}
+			break;
+		case ERequestType::GET_INFO:
+			{
+				FString JSONPayload;
+				FJsonObjectConverter::UStructToJsonObjectString(*Obj, JSONPayload, 0, 0);
+				
+				FIDEResponse Response;
+				Response.Status = EResponseStatus::OK;
+				Response.AnswerString = JSONPayload;
 
-			FIDEResponse Response;
-			Response.Header.Status = EResponseStatus::OK;
-			Response.AnswerString = "Successfully opened blueprint object " + ClassName;
-
-			IDEClient->SendResponse(Response);
-		});
+				IDEClient->SendResponse(Response);
+			}
+			break;
+		}
 	}
 }
 
