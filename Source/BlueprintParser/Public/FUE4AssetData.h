@@ -33,6 +33,10 @@ struct FBlueprintClassObject
 	UPROPERTY()
 	FString PackageName;
 
+	// Variable name -> Variable value
+	UPROPERTY()
+	TMap<FString, FString> Properties;
+
 	FBlueprintClassObject(const int Index, const FString& ObjectName, const FString& ClassName,
 	                      const FString& SuperClassName, const FString& PackageName):
 		Index(Index),

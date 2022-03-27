@@ -8,7 +8,6 @@
 #include "Interfaces/IPv4/IPv4Endpoint.h"
 #include "FIDEClient.h"
 #include "JsonObjectConverter.h"
-#include "Kismet2/KismetEditorUtilities.h"
 #include "Async/Async.h"
 
 #define LOCTEXT_NAMESPACE "FBlueprintParserModule"
@@ -30,7 +29,7 @@ void FBlueprintParserModule::StartupModule()
 			BlueprintClassObjectCache.Add(BlueprintClassObj.SuperClassName, BlueprintClassObj);
 		}
 	}
-
+	
 	CreateIDESocket();
 }
 
@@ -170,21 +169,8 @@ void FBlueprintParserModule::ServeIDERequest(FIDERequest Request)
 		{
 		case ERequestType::OPEN:
 			{
-				AsyncTask(ENamedThreads::GameThread, [=]
+				FBlueprintParserUtils::OpenBlueprint(Obj, [IDEClient = IDEClient, ClassName = std::move(ClassName)]
 				{
-					const auto PackageName = Obj->PackageName;
-					UPackage* Package = LoadPackage(nullptr, *PackageName, LOAD_NoRedirects);
-
-					if (Package)
-					{
-						Package->FullyLoad();
-
-						FString AssetName = FPaths::GetBaseFilename(*PackageName);
-						UObject* Object = FindObject<UObject>(Package, *AssetName);
-						if (Object != nullptr)
-							FKismetEditorUtilities::BringKismetToFocusAttentionOnObject(Object);
-					}
-
 					FIDEResponse Response;
 					Response.Status = EResponseStatus::OK;
 					Response.AnswerString = "Successfully opened blueprint object " + ClassName;
@@ -195,6 +181,16 @@ void FBlueprintParserModule::ServeIDERequest(FIDERequest Request)
 			break;
 		case ERequestType::GET_INFO:
 			{
+				const auto UEObject = LoadObject<UObject>(nullptr, *Obj->PackageName);
+				if (UEObject)
+				{
+					Obj->Properties = FBlueprintParserUtils::GetUObjectBlueprintProperties(UEObject);
+				}
+				else
+				{
+					UE_LOG(LogBlueprintParser, Warning, TEXT("Can't load object with package name: %s"), *Obj->PackageName);
+				}
+				
 				FString JSONPayload;
 				FJsonObjectConverter::UStructToJsonObjectString(*Obj, JSONPayload, 0, 0);
 				
